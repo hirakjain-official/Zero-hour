@@ -3,9 +3,15 @@ const router = express.Router();
 const { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 // Initialize Bedrock Client
-// AWS credentials will be automatically picked up from the EC2 IAM Role,
-// or from environment variables (.env.production) if running locally.
-const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
+// Automatically uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY if securely provided in .env
+const clientConfig = { region: process.env.AWS_REGION || 'us-east-1' };
+if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    clientConfig.credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    };
+}
+const bedrock = new BedrockRuntimeClient(clientConfig);
 
 const SYSTEM_CONTEXT = `You are an incredibly brilliant but highly sarcastic senior software engineer.
 You are built directly into a VS Code-like web IDE to mentor a junior developer.
@@ -32,65 +38,64 @@ router.post('/chat', async (req, res) => {
     const { message, code, language, errors, history } = req.body;
 
     try {
-        // 2. Build the conversation history for Claude 3 Messages API
-        let messages = (history || [])
-            .filter(msg => msg.content && String(msg.content).trim().length > 0)
-            .map(msg => ({
-                role: msg.role === 'user' ? 'user' : 'assistant',
-                content: msg.content
-            }));
+        // 2. Build the conversation history
+        let previousMessages = (history || [])
+            .filter(msg => msg.content && String(msg.content).trim().length > 0);
 
-        // Claude 3 strictly requires the messages array to start with a 'user' role.
         // The frontend initializes with an 'assistant' greeting, which we must drop.
-        while (messages.length > 0 && messages[0].role === 'assistant') {
-            messages.shift();
+        while (previousMessages.length > 0 && previousMessages[0].role === 'assistant') {
+            previousMessages.shift();
         }
 
-        // 3. Construct the latest prompt with all available context
-        let promptText = "";
+        // 3. Construct the latest prompt context
+        let currentContext = "";
 
         if (code) {
-            promptText += `Here is the current file they are looking at (${language || 'unknown'}):\n\`\`\`${language || ''}\n${code.slice(0, 3000)}\n\`\`\`\n\n`;
+            currentContext += `Here is the current file they are looking at (${language || 'unknown'}):\n\`\`\`${language || ''}\n${code.slice(0, 3000)}\n\`\`\`\n\n`;
         }
 
         if (errors) {
-            promptText += `Here is the error output from the terminal they just triggered:\n\`\`\`\n${errors.slice(0, 2000)}\n\`\`\`\n\n`;
+            currentContext += `Here is the error output from the terminal they just triggered:\n\`\`\`\n${errors.slice(0, 2000)}\n\`\`\`\n\n`;
         }
 
-        promptText += `User Question: ${message}`;
+        currentContext += `User Question: ${message}`;
 
-        messages.push({
-            role: 'user',
-            content: promptText
-        });
+        // 4. Construct Mistral's specific <s>[INST]...[/INST] prompt format
+        let mistralPrompt = `<s>[INST] SYSTEM CONTEXT: ${SYSTEM_CONTEXT}\n\n`;
 
-        // 4. Configure Bedrock Request for Anthropic Claude 3.5 Sonnet
+        for (const msg of previousMessages) {
+            if (msg.role === 'user') {
+                mistralPrompt += `${msg.content} [/INST] `;
+            } else {
+                mistralPrompt += `${msg.content} </s><s>[INST] `;
+            }
+        }
+        mistralPrompt += `${currentContext} [/INST]`;
+
+        // 5. Configure Bedrock Request for Mistral Large (using the model ID you mentioned)
         const command = new InvokeModelWithResponseStreamCommand({
-            modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+            modelId: 'mistral.mistral-large-2407-v1:0',
             contentType: 'application/json',
             accept: 'application/json',
             body: JSON.stringify({
-                anthropic_version: "bedrock-2023-05-31",
+                prompt: mistralPrompt,
                 max_tokens: 2000,
-                system: SYSTEM_CONTEXT,
-                messages: messages,
-                temperature: 0.7, // A bit of creativity for the sarcasm
+                temperature: 0.7,
                 top_p: 0.9,
             })
         });
 
-        // 5. Invoke the streaming API
+        // 6. Invoke the streaming API
         const response = await bedrock.send(command);
 
-        // 6. Iterate through the stream chunks and pipe them to the client
+        // 7. Iterate through the stream chunks and pipe them to the client
         for await (const event of response.body) {
             if (event.chunk && event.chunk.bytes) {
                 const chunkData = JSON.parse(new TextDecoder().decode(event.chunk.bytes));
 
-                // Claude returns different types of events in the stream
-                if (chunkData.type === 'content_block_delta' && chunkData.delta && chunkData.delta.text) {
-                    // Send the text chunk as an SSE message
-                    res.write(`data: ${JSON.stringify({ text: chunkData.delta.text })}\n\n`);
+                // Mistral returns an array of outputs: { outputs: [{ text: "..." }] }
+                if (chunkData.outputs && chunkData.outputs[0] && chunkData.outputs[0].text) {
+                    res.write(`data: ${JSON.stringify({ text: chunkData.outputs[0].text })}\n\n`);
                 }
             }
         }
