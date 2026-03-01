@@ -60,25 +60,28 @@ router.post('/chat', async (req, res) => {
 
         currentContext += `User Question: ${message}`;
 
-        // 4. Construct Mistral's specific <s>[INST]...[/INST] prompt format
-        let mistralPrompt = `<s>[INST] SYSTEM CONTEXT: ${SYSTEM_CONTEXT}\n\n`;
+        // 4. Construct Mistral's specific messages array
+        let mistralMessages = [];
+
+        // Mistral allows the "system" role at the top for context
+        mistralMessages.push({
+            role: 'system',
+            content: SYSTEM_CONTEXT
+        });
 
         for (const msg of previousMessages) {
-            if (msg.role === 'user') {
-                mistralPrompt += `${msg.content} [/INST] `;
-            } else {
-                mistralPrompt += `${msg.content} </s><s>[INST] `;
-            }
+            mistralMessages.push({ role: msg.role === 'user' ? 'user' : 'assistant', content: msg.content });
         }
-        mistralPrompt += `${currentContext} [/INST]`;
 
-        // 5. Configure Bedrock Request for Mistral Large (using the model ID you mentioned)
+        mistralMessages.push({ role: 'user', content: currentContext });
+
+        // 5. Configure Bedrock Request for Mistral Large
         const command = new InvokeModelWithResponseStreamCommand({
-            modelId: 'mistral.mistral-large-2407-v1:0',
+            modelId: 'mistral.devstral-2-123b',
             contentType: 'application/json',
             accept: 'application/json',
             body: JSON.stringify({
-                prompt: mistralPrompt,
+                messages: mistralMessages,
                 max_tokens: 2000,
                 temperature: 0.7,
                 top_p: 0.9,
@@ -93,9 +96,14 @@ router.post('/chat', async (req, res) => {
             if (event.chunk && event.chunk.bytes) {
                 const chunkData = JSON.parse(new TextDecoder().decode(event.chunk.bytes));
 
-                // Mistral returns an array of outputs: { outputs: [{ text: "..." }] }
-                if (chunkData.outputs && chunkData.outputs[0] && chunkData.outputs[0].text) {
+                // Mistral can return different stream formats depending on endpoint: 
+                // choices[0].delta.content OR outputs[0].text OR delta.text (Claude compat)
+                if (chunkData.choices && chunkData.choices[0] && chunkData.choices[0].delta && chunkData.choices[0].delta.content) {
+                    res.write(`data: ${JSON.stringify({ text: chunkData.choices[0].delta.content })}\n\n`);
+                } else if (chunkData.outputs && chunkData.outputs[0] && chunkData.outputs[0].text) {
                     res.write(`data: ${JSON.stringify({ text: chunkData.outputs[0].text })}\n\n`);
+                } else if (chunkData.type === 'content_block_delta' && chunkData.delta && chunkData.delta.text) {
+                    res.write(`data: ${JSON.stringify({ text: chunkData.delta.text })}\n\n`);
                 }
             }
         }
