@@ -38,6 +38,18 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Inject Session Middleware from frontend headers
+app.use((req, res, next) => {
+    const sessionId = req.headers['x-session-id'];
+    if (sessionId) {
+        req.session = sessionManager.getSession(sessionId);
+        if (req.session) {
+            sessionManager.touchSession(sessionId);
+        }
+    }
+    next();
+});
+
 // Dynamic App Preview Proxy Server
 // Automatically routes /preview/session-abc/ to the mapped port
 app.use('/preview/:sessionId', (req, res, next) => {
