@@ -33,10 +33,12 @@ router.post('/chat', async (req, res) => {
 
     try {
         // 2. Build the conversation history for Claude 3 Messages API
-        const messages = (history || []).map(msg => ({
-            role: msg.role === 'user' ? 'user' : 'assistant',
-            content: [{ text: msg.content }]
-        }));
+        const messages = (history || [])
+            .filter(msg => msg.content && String(msg.content).trim().length > 0)
+            .map(msg => ({
+                role: msg.role === 'user' ? 'user' : 'assistant',
+                content: msg.content
+            }));
 
         // 3. Construct the latest prompt with all available context
         let promptText = "";
@@ -53,7 +55,7 @@ router.post('/chat', async (req, res) => {
 
         messages.push({
             role: 'user',
-            content: [{ text: promptText }]
+            content: promptText
         });
 
         // 4. Configure Bedrock Request for Anthropic Claude 3.5 Sonnet
