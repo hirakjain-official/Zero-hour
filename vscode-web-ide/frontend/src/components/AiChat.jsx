@@ -82,10 +82,13 @@ export default function AiChat({ API, currentTab, visible, onToggle, width }) {
         setMessages(prev => [...prev, { id: assistantId, role: 'assistant', text: '', ts: Date.now() }]);
 
         try {
-            const history = messages.slice(-6).map(m => ({
-                role: m.role === 'user' ? 'user' : 'assistant',
-                content: m.text
-            }));
+            const history = messages
+                .filter(m => m.text && m.text.trim().length > 0)
+                .slice(-6)
+                .map(m => ({
+                    role: m.role === 'user' ? 'user' : 'assistant',
+                    content: m.text
+                }));
 
             // Send the sessionId to ensure sandbox integration context
             const sessionId = localStorage.getItem('ide_session_id') || '';

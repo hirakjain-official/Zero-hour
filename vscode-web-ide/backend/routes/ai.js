@@ -33,12 +33,18 @@ router.post('/chat', async (req, res) => {
 
     try {
         // 2. Build the conversation history for Claude 3 Messages API
-        const messages = (history || [])
+        let messages = (history || [])
             .filter(msg => msg.content && String(msg.content).trim().length > 0)
             .map(msg => ({
                 role: msg.role === 'user' ? 'user' : 'assistant',
                 content: msg.content
             }));
+
+        // Claude 3 strictly requires the messages array to start with a 'user' role.
+        // The frontend initializes with an 'assistant' greeting, which we must drop.
+        while (messages.length > 0 && messages[0].role === 'assistant') {
+            messages.shift();
+        }
 
         // 3. Construct the latest prompt with all available context
         let promptText = "";
