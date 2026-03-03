@@ -47,6 +47,15 @@ router.post('/', async (req, res) => {
         return res.json({ stdout: '', stderr: `Language '${lang}' is not supported yet.`, exitCode: 1, language: lang });
     }
 
+    if (!req.session || !req.session.containerName) {
+        return res.json({
+            stdout: '',
+            stderr: 'Session expired or backend restarted. Please simply refresh the IDE page to reconnect to your Sandbox!',
+            exitCode: 1,
+            language: lang
+        });
+    }
+
     // Write code to temp file if code is provided inline
     const root = getWorkspaceRoot(req);
     let execPath = filePath ? path.resolve(root, filePath.replace(/^\//, '')) : null;

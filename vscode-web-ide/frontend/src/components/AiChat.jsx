@@ -50,7 +50,7 @@ function renderMessage(text) {
     });
 }
 
-export default function AiChat({ API, currentTab, visible, onToggle, width }) {
+export default function AiChat({ API, currentTab, tabs, fileTree, terminalOutput, visible, onToggle, width }) {
     const [messages, setMessages] = useState([
         {
             role: 'assistant',
@@ -93,6 +93,10 @@ export default function AiChat({ API, currentTab, visible, onToggle, width }) {
             // Send the sessionId to ensure sandbox integration context
             const sessionId = localStorage.getItem('ide_session_id') || '';
 
+            const openTabsContext = (tabs || []).map(t => t.path).join(', ');
+            const terminalContext = (terminalOutput || []).slice(-50).map(t => t.text).join('\n');
+            const fileTreeContext = JSON.stringify(fileTree || {}, null, 2).slice(0, 1500); // cap length
+
             const res = await fetch(`${API}/api/ai/chat`, {
                 method: 'POST',
                 headers: {
@@ -103,6 +107,9 @@ export default function AiChat({ API, currentTab, visible, onToggle, width }) {
                     message: text,
                     code: currentTab?.content?.slice(0, 3000),
                     language: currentTab?.name?.split('.').pop(),
+                    fileTree: fileTreeContext,
+                    openTabs: openTabsContext,
+                    terminalOutput: terminalContext,
                     history
                 })
             });

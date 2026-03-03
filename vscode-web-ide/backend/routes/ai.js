@@ -13,19 +13,22 @@ if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
 }
 const bedrock = new BedrockRuntimeClient(clientConfig);
 
-const SYSTEM_CONTEXT = `You are an incredibly brilliant but highly sarcastic senior software engineer.
-You are built directly into a VS Code-like web IDE to mentor a junior developer.
+const SYSTEM_CONTEXT = `You are a brilliant, highly observant, and slightly sarcastic Senior AI Mentor built directly into a VS Code-like cloud IDE.
 
 Your Personality:
-- You are condescending but ultimately helpful.
-- You sigh (figuratively or literally via text like "*sigh*") at obvious mistakes.
-- You use dry humor and sarcasm to point out bugs.
-- Despite the attitude, you ALWAYS provide the correct solution, code snippets, and explanations. You want them to succeed, you just want them to know you suffered reading their code.
+- You use dry humor and sarcasm to point out bugs, but you are ALWAYS encouraging and supportive.
+- You want the user to succeed and learn. Compliment them when they do well, but playfully tease them for obvious mistakes.
+- DO NOT just scold them irrelevantly. Always guide them back to the correct path with clear, conceptual hints.
+
+Your Superpower (Omniscience):
+- You have REAL-TIME access to the user's entire IDE state: The File Tree, their Open Tabs, the Active File they are looking at, and their Recent Terminal Output.
+- You must CROSS-REFERENCE these. If the user asks why "app.py" is failing, but the Terminal Output shows a KeyError for "DB_PASSWORD", and your File Tree shows they don't have a ".env" file, you must playfully call this out! (e.g., "I see you're staring at the HTML, but the terminal is screaming about a missing .env file. Let's fix that first!")
 
 Instructions:
-- Format code examples with proper markdown and language tags.
-- Explain WHY the code failed, not just how to fix it.
-- If the user provides an error log or code snippet, address it directly with your sarcastic persona.`;
+- NEVER give the exact, completed final code block. No spoilers!
+- Give them HINTS, conceptual guidance, and point out which file or line is wrong based on your Omniscient context.
+- Force the user to think and write the final correct code themselves.
+- Format code examples with proper markdown, but only write *parts* of the solution or pseudo-code to guide them.`;
 
 // POST /api/ai/chat
 // Uses Server-Sent Events (SSE) to stream the Claude response back to the UI
@@ -35,7 +38,7 @@ router.post('/chat', async (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    const { message, code, language, errors, history } = req.body;
+    const { message, code, language, errors, history, fileTree, openTabs, terminalOutput } = req.body;
 
     try {
         // 2. Build the conversation history
@@ -48,17 +51,21 @@ router.post('/chat', async (req, res) => {
         }
 
         // 3. Construct the latest prompt context
-        let currentContext = "";
+        let currentContext = "=== LIVE IDE ECOSYSTEM STATE ===\n";
+
+        if (fileTree) currentContext += `[WORKSPACE FILE TREE]\n\`\`\`json\n${fileTree}\n\`\`\`\n\n`;
+        if (openTabs) currentContext += `[CURRENTLY OPEN TABS]: ${openTabs}\n\n`;
+        if (terminalOutput) currentContext += `[RECENT TERMINAL LOGS]\n\`\`\`\n${terminalOutput}\n\`\`\`\n\n`;
 
         if (code) {
-            currentContext += `Here is the current file they are looking at (${language || 'unknown'}):\n\`\`\`${language || ''}\n${code.slice(0, 3000)}\n\`\`\`\n\n`;
+            currentContext += `[ACTIVELY FOCUSED FILE] (${language || 'unknown'}):\n\`\`\`${language || ''}\n${code.slice(0, 3000)}\n\`\`\`\n\n`;
         }
 
         if (errors) {
-            currentContext += `Here is the error output from the terminal they just triggered:\n\`\`\`\n${errors.slice(0, 2000)}\n\`\`\`\n\n`;
+            currentContext += `[CRASH LOG FROM EXECUTION]:\n\`\`\`\n${errors.slice(0, 2000)}\n\`\`\`\n\n`;
         }
 
-        currentContext += `User Question: ${message}`;
+        currentContext += `[USER MESSAGE]: ${message}`;
 
         // 4. Construct Mistral's specific messages array
         let mistralMessages = [];

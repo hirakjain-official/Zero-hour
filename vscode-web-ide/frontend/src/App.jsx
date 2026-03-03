@@ -730,6 +730,9 @@ export default function App() {
             <AiChat
               API={API}
               currentTab={activeTabData}
+              tabs={tabs}
+              fileTree={fileTree}
+              terminalOutput={terminalOutput}
               visible={true}
               onToggle={() => setShowAI(false)}
               width={aiWidth}
