@@ -82,7 +82,9 @@ app.get('/health', (req, res) => {
 // WebSocket terminal handler
 wss.on('connection', (ws) => {
     // Expected connection url: wss://domain.com/terminal?sessionId=abc
-    const url = new URL(ws._socket.url || req.url, `http://${req.headers.host}`);
+    const wsUrl = ws.url || ws._socket?.url || '/';
+    // Dummy host since we just need to parse the searchParams
+    const url = new URL(wsUrl, `http://localhost`);
     const sessionId = url.searchParams.get('sessionId');
 
     const session = sessionManager.getSession(sessionId);

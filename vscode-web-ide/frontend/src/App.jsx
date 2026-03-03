@@ -196,13 +196,14 @@ export default function App() {
   useEffect(() => {
     if (!activeTabData?.content || !sessionId) return;
 
-    // Only trigger if code actually changed since last eval
+    // Only trigger if code actually changed since last eval (ignore minor whitespace, but keep fast reaction)
     if (activeTabData.content === lastEvalCodeRef.current) return;
 
     if (evalTimerRef.current) clearTimeout(evalTimerRef.current);
 
     evalTimerRef.current = setTimeout(async () => {
       lastEvalCodeRef.current = activeTabData.content;
+      console.log('🤖 AI Agent Executing Background Evaluation...');
       try {
         const fileTreeContext = JSON.stringify(fileTree || {}, null, 2).slice(0, 1500);
         const openTabsContext = tabs.map(t => t.path).join(', ');
@@ -220,16 +221,17 @@ export default function App() {
           })
         });
         const data = await res.json();
+        console.log('🤖 AI Agent Result:', data);
 
         if (data.action && data.action !== 'ignore') {
           setAiPopup({ action: data.action, message: data.message });
-          // Auto-hide praise after 5s, let scold/redirect persist longer
-          setTimeout(() => setAiPopup(null), data.action === 'praise' ? 5000 : 10000);
+          // Auto-hide praise quickly, keep scolds up longer
+          setTimeout(() => setAiPopup(null), data.action === 'praise' ? 4000 : 7000);
         }
       } catch (e) {
-        // silent fail for background agent
+        console.error('AI Agent Background Error:', e);
       }
-    }, 3500); // Wait 3.5s after user stops typing
+    }, 2500); // Wait 2.5s after user stops typing to aggressively evaluate
 
     return () => clearTimeout(evalTimerRef.current);
   }, [activeTabData?.content, sessionId, fileTree, tabs, terminalOutput]);
