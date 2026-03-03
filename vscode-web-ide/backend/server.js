@@ -94,7 +94,7 @@ wss.on('connection', (ws) => {
     sessionManager.touchSession(sessionId);
 
     // DOCKER SANDBOX: Instead of raw powershell/bash, exec into the user's specific container!
-    const proc = spawn('docker', ['exec', '-it', session.containerName, 'bash'], {
+    const proc = spawn('docker', ['exec', '-i', session.containerName, 'bash'], {
         env: { ...process.env, TERM: 'xterm-256color' }
     });
 

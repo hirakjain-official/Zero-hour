@@ -57,6 +57,32 @@ function MenuBar({ menus, onClose }) {
     </div>
   );
 }
+
+/* ── AiAgentPopup Component ── */
+function AiAgentPopup({ popup, onClose }) {
+  if (!popup) return null;
+  const colors = {
+    praise: '#4caf50',
+    scold: '#ff9800',
+    redirect: '#f44336'
+  };
+  const title = {
+    praise: 'Agent: Good Job!',
+    scold: 'Agent: Minor Issue',
+    redirect: 'Agent: STOP!'
+  };
+
+  return (
+    <div className="ai-agent-popup" style={{ borderColor: colors[popup.action] || '#888' }}>
+      <button className="ai-agent-close" onClick={onClose}>×</button>
+      <div className="ai-agent-header" style={{ color: colors[popup.action] || '#888' }}>
+        {title[popup.action] || 'Agent'}
+      </div>
+      <div className="ai-agent-body">{popup.message}</div>
+    </div>
+  );
+}
+
 import ActivityBar from './components/ActivityBar';
 import Sidebar from './components/Sidebar';
 import TabBar from './components/TabBar';
@@ -165,6 +191,48 @@ export default function App() {
 
     return () => clearInterval(pingInterval);
   }, []); // Run once on mount
+
+  // --- Background AI Evaluator Loop ---
+  useEffect(() => {
+    if (!activeTabData?.content || !sessionId) return;
+
+    // Only trigger if code actually changed since last eval
+    if (activeTabData.content === lastEvalCodeRef.current) return;
+
+    if (evalTimerRef.current) clearTimeout(evalTimerRef.current);
+
+    evalTimerRef.current = setTimeout(async () => {
+      lastEvalCodeRef.current = activeTabData.content;
+      try {
+        const fileTreeContext = JSON.stringify(fileTree || {}, null, 2).slice(0, 1500);
+        const openTabsContext = tabs.map(t => t.path).join(', ');
+        const terminalContext = terminalOutput.slice(-50).map(t => t.text).join('\n');
+
+        const res = await fetch(`${API}/api/ai/evaluate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: activeTabData.content.slice(0, 3000),
+            language: activeTabData.name?.split('.').pop(),
+            fileTree: fileTreeContext,
+            openTabs: openTabsContext,
+            terminalOutput: terminalContext
+          })
+        });
+        const data = await res.json();
+
+        if (data.action && data.action !== 'ignore') {
+          setAiPopup({ action: data.action, message: data.message });
+          // Auto-hide praise after 5s, let scold/redirect persist longer
+          setTimeout(() => setAiPopup(null), data.action === 'praise' ? 5000 : 10000);
+        }
+      } catch (e) {
+        // silent fail for background agent
+      }
+    }, 3500); // Wait 3.5s after user stops typing
+
+    return () => clearTimeout(evalTimerRef.current);
+  }, [activeTabData?.content, sessionId, fileTree, tabs, terminalOutput]);
 
   useEffect(() => {
     if (sessionReady) loadTree();
@@ -740,6 +808,8 @@ export default function App() {
           </>
         )}
       </div>
+
+      <AiAgentPopup popup={aiPopup} onClose={() => setAiPopup(null)} />
 
       {/* ── Status Bar ── */}
       <StatusBar

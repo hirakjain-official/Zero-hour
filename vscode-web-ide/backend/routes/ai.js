@@ -141,4 +141,77 @@ router.post('/chat', async (req, res) => {
     }
 });
 
+const EVALUATOR_CONTEXT = `You are a strict, highly observant, and sarcastic Senior AI Evaluator built into a VS Code web IDE.
+You are a BACKGROUND AGENT continuously watching the user type. You do NOT chat. You ONLY evaluate if they are on track, based on your omniscient context.
+
+Your Superpower:
+- You have REAL-TIME access to the user's File Tree, their Open Tabs, the Active File they are editing, and Recent Terminal Output.
+
+Your Mission:
+Evaluate the user's current code edit against the context and terminal errors.
+- Are they fixing the error shown in the terminal?
+- Are they editing a completely irrelevant file (e.g., editing HTML when the backend Python crashed)?
+- Is their code horribly wrong or syntactically broken?
+
+You MUST return your response as a STRICT, VALID JSON object matching this exact format:
+{
+  "action": "praise" | "scold" | "redirect" | "ignore",
+  "message": "Your 1-sentence sarcastic but encouraging popup message."
+}
+
+Rules for JSON "action":
+- "ignore": Use 80% of the time if they are just typing normally and on the right track. Message can be empty.
+- "praise": Use if they just fixed a nasty bug correctly or wrote a great line of code.
+- "scold": Use if they made an obvious typo or syntax error in the right file.
+- "redirect": Use if they are in the completely WRONG file based on the terminal crash log. (e.g. terminal says missing .env, but they are looking at HTML).
+
+Do NOT wrap the JSON in markdown blocks. Return ONLY the raw JSON object.`;
+
+// POST /api/ai/evaluate
+// Silent background evaluator that returns strict JSON actions
+router.post('/evaluate', async (req, res) => {
+    const { code, language, fileTree, openTabs, terminalOutput } = req.body;
+
+    try {
+        let currentContext = "=== LIVE IDE ECOSYSTEM STATE ===\n";
+
+        if (fileTree) currentContext += `[WORKSPACE FILE TREE]\n\`\`\`json\n${fileTree}\n\`\`\`\n\n`;
+        if (openTabs) currentContext += `[CURRENTLY OPEN TABS]: ${openTabs}\n\n`;
+        if (terminalOutput) currentContext += `[RECENT TERMINAL LOGS]\n\`\`\`\n${terminalOutput}\n\`\`\`\n\n`;
+
+        if (code) {
+            currentContext += `[ACTIVELY FOCUSED FILE JUST EDITED] (${language || 'unknown'}):\n\`\`\`${language || ''}\n${code.slice(0, 3000)}\n\`\`\`\n\n`;
+        }
+
+        currentContext += `Evaluate this state and return the strict JSON payload.`;
+
+        const command = new InvokeModelCommand({
+            modelId: "mistral.mistral-large-2407-v1:0", // Changed model id as user runs on mistral.mistral-large-2407-v1:0 in previous file history
+            contentType: "application/json",
+            accept: "application/json",
+            body: JSON.stringify({
+                prompt: `<s>[INST] ${EVALUATOR_CONTEXT}\n\n${currentContext} [/INST]`,
+                max_tokens: 200,
+                temperature: 0.2, // Low temp for strict JSON adherence
+            })
+        });
+
+        const response = await bedrock.send(command);
+        const data = JSON.parse(new TextDecoder().decode(response.body));
+        let aiText = data.outputs[0].text.trim();
+
+        // Basic clean up in case Mistral still wraps in markdown
+        if (aiText.startsWith('\`\`\`json')) aiText = aiText.replace('\`\`\`json', '');
+        if (aiText.startsWith('\`\`\`')) aiText = aiText.replace('\`\`\`', '');
+        if (aiText.endsWith('\`\`\`')) aiText = aiText.substring(0, aiText.length - 3);
+
+        const parsedJson = JSON.parse(aiText.trim());
+        res.json(parsedJson);
+
+    } catch (error) {
+        console.error('AI Evaluator Error:', error);
+        res.status(500).json({ action: "ignore", message: "" });
+    }
+});
+
 module.exports = router;
