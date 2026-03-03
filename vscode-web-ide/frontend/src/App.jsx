@@ -193,48 +193,54 @@ export default function App() {
   }, []); // Run once on mount
 
   // --- Background AI Evaluator Loop ---
-  useEffect(() => {
+  const triggerEvaluator = useCallback(async () => {
     if (!activeTabData?.content || !sessionId) return;
+    console.log('🤖 AI Agent Executing Evaluation...');
+    try {
+      lastEvalCodeRef.current = activeTabData.content;
+      const fileTreeContext = JSON.stringify(fileTree || {}, null, 2).slice(0, 1500);
+      const openTabsContext = tabs.map(t => t.path).join(', ');
+      const terminalContext = terminalOutput.slice(-50).map(t => t.text).join('\n');
 
+      const res = await fetch(`${API}/api/ai/evaluate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: activeTabData.content.slice(0, 3000),
+          language: activeTabData.name?.split('.').pop(),
+          fileTree: fileTreeContext,
+          openTabs: openTabsContext,
+          terminalOutput: terminalContext
+        })
+      });
+      const data = await res.json();
+      console.log('🤖 AI Agent Result:', data);
+
+      if (data.action && data.action !== 'ignore') {
+        setAiPopup({ action: data.action, message: data.message });
+        setTimeout(() => setAiPopup(null), data.action === 'praise' ? 4000 : 7000);
+      }
+    } catch (e) {
+      console.error('AI Agent Background Error:', e);
+    }
+  }, [activeTabData, sessionId, fileTree, tabs, terminalOutput, setAiPopup, API]);
+
+  useEffect(() => {
     // Only trigger if code actually changed since last eval (ignore minor whitespace, but keep fast reaction)
-    if (activeTabData.content === lastEvalCodeRef.current) return;
+    if (!activeTabData?.content || activeTabData.content === lastEvalCodeRef.current) return;
 
     if (evalTimerRef.current) clearTimeout(evalTimerRef.current);
-
-    evalTimerRef.current = setTimeout(async () => {
-      lastEvalCodeRef.current = activeTabData.content;
-      console.log('🤖 AI Agent Executing Background Evaluation...');
-      try {
-        const fileTreeContext = JSON.stringify(fileTree || {}, null, 2).slice(0, 1500);
-        const openTabsContext = tabs.map(t => t.path).join(', ');
-        const terminalContext = terminalOutput.slice(-50).map(t => t.text).join('\n');
-
-        const res = await fetch(`${API}/api/ai/evaluate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code: activeTabData.content.slice(0, 3000),
-            language: activeTabData.name?.split('.').pop(),
-            fileTree: fileTreeContext,
-            openTabs: openTabsContext,
-            terminalOutput: terminalContext
-          })
-        });
-        const data = await res.json();
-        console.log('🤖 AI Agent Result:', data);
-
-        if (data.action && data.action !== 'ignore') {
-          setAiPopup({ action: data.action, message: data.message });
-          // Auto-hide praise quickly, keep scolds up longer
-          setTimeout(() => setAiPopup(null), data.action === 'praise' ? 4000 : 7000);
-        }
-      } catch (e) {
-        console.error('AI Agent Background Error:', e);
-      }
-    }, 2500); // Wait 2.5s after user stops typing to aggressively evaluate
+    evalTimerRef.current = setTimeout(triggerEvaluator, 2500); // 2.5s debounce
 
     return () => clearTimeout(evalTimerRef.current);
-  }, [activeTabData?.content, sessionId, fileTree, tabs, terminalOutput]);
+  }, [activeTabData?.content, triggerEvaluator]);
+
+  // Hook for forced manual button evaluation
+  useEffect(() => {
+    const handleForceEval = () => triggerEvaluator();
+    window.addEventListener('force-ai-eval', handleForceEval);
+    return () => window.removeEventListener('force-ai-eval', handleForceEval);
+  }, [triggerEvaluator]);
 
   useEffect(() => {
     if (sessionReady) loadTree();
