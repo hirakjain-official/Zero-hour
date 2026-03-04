@@ -19,7 +19,7 @@ function getWorkspaceRoot(req) {
 const RUNNERS = {
     javascript: { cmd: 'node', ext: '.js' },
     typescript: { cmd: 'npx', args: ['ts-node'], ext: '.ts' },
-    python: { cmd: 'python', ext: '.py', fallbacks: ['python3'] },
+    python: { cmd: 'python3', ext: '.py' },
     bash: { cmd: 'bash', ext: '.sh' },
     sh: { cmd: 'bash', ext: '.sh' },
 };
