@@ -16,7 +16,7 @@ router.use((req, res, next) => {
 });
 
 // GET /api/session/init
-// Assigns a session ID and spins up container
+// Assigns a session ID and spins up container (falls back to local disk if Docker unavailable)
 router.post('/init', async (req, res) => {
     try {
         const { sessionId } = req.body;
@@ -24,8 +24,19 @@ router.post('/init', async (req, res) => {
         const session = await sessionManager.createSession(sessionId);
         res.json({ success: true, session });
     } catch (e) {
-        console.error('Session Init Error:', e);
-        res.status(500).json({ error: 'Failed to initialize session / container' });
+        console.warn('Session Docker init failed — falling back to local-disk session:', e.message);
+        // Return a partial session so the frontend can still load the default workspace
+        const fallbackId = req.body.sessionId || require('crypto').randomBytes(16).toString('hex');
+        res.json({
+            success: true,
+            session: {
+                sessionId: fallbackId,
+                isNew: true,
+                workspaceDir: null, // files.js will use the default workspace
+                port: null,
+                containerName: null
+            }
+        });
     }
 });
 

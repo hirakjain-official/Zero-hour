@@ -126,6 +126,10 @@ export default function App() {
   const [previewWidth, setPreviewWidth] = useState(360);
   const [aiWidth, setAiWidth] = useState(320);
 
+  const [aiPopup, setAiPopup] = useState(null);
+  const lastEvalCodeRef = useRef('');
+  const evalTimerRef = useRef(null);
+
   const [activeTerminalTab, setActiveTerminalTab] = useState('output');
   const [terminalOutput, setTerminalOutput] = useState([
     { type: 'info', text: '✅  VS Code Web IDE is ready! Click ▶ Run to execute files.' },
@@ -144,6 +148,9 @@ export default function App() {
 
   // Editor ref for undo/redo/find
   const editorRef = useRef(null);
+
+  // Derived state — must be before hooks that use it to avoid TDZ
+  const activeTabData = tabs.find(t => t.id === activeTab);
 
   const loadTree = useCallback(async () => {
     if (!sessionId) return;
@@ -423,8 +430,6 @@ export default function App() {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
-
-  const activeTabData = tabs.find(t => t.id === activeTab);
 
   const saveAll = () => {
     tabs.filter(t => t.modified).forEach(t => saveFile(t.id, t.content));

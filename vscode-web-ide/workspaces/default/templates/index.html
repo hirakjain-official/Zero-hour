@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><title>Login — Flask Challenge</title>
+  <style>
+    body { min-height:100vh; display:flex; align-items:center; justify-content:center;
+           background:#0f0f1a; font-family:'Segoe UI',sans-serif; color:#e0e0e0; }
+    .card { background:#1a1a2e; border:1px solid #2d2d50; border-radius:12px;
+            padding:40px; width:360px; box-shadow:0 8px 32px rgba(0,0,0,.5); }
+    h1 { font-size:22px; color:#a78bfa; margin-bottom:8px; }
+    label { display:block; font-size:12px; color:#888; margin-top:16px; margin-bottom:4px; }
+    input { width:100%; padding:10px 14px; background:#0f0f1a; border:1px solid #333;
+            border-radius:8px; color:#e0e0e0; font-size:14px; }
+    button { width:100%; margin-top:24px; padding:12px;
+             background:linear-gradient(135deg,#7c3aed,#a78bfa);
+             border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
+    #result { margin-top:16px; padding:10px 14px; border-radius:8px; font-size:13px; display:none; }
+    .success { background:#14290a; color:#4ade80; border:1px solid #166534; }
+    .error   { background:#290a0a; color:#f87171; border:1px solid #7f1d1d; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔐 Flask Login</h1>
+    <p style="font-size:13px;color:#666;">Challenge: Fix the bug so login works!</p>
+    <label>Username</label><input id="u" type="text" placeholder="admin" />
+    <label>Password</label><input id="p" type="password" placeholder="secret123" />
+    <button onclick="go()">Login</button>
+    <div id="result"></div>
+  </div>
+  <script>
+    async function go() {
+      const r = document.getElementById('result');
+      try {
+        const res = await fetch('/login', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({username: u.value.trim(), password: p.value.trim()})
+        });
+        const d = await res.json();
+        r.style.display='block';
+        r.className = res.ok ? 'success' : 'error';
+        r.textContent = res.ok ? '✅ ' + d.token : '❌ ' + (d.error || 'Failed');
+      } catch(e) { r.style.display='block'; r.className='error'; r.textContent='⚠️ Server unreachable'; }
+    }
+    document.onkeydown = e => e.key==='Enter' && go();
+  </script>
+</body>
+</html>

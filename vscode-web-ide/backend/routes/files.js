@@ -3,13 +3,114 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 
+const BASE_WORKSPACES = process.env.WORKSPACE_DIR || path.join(__dirname, '../../workspaces');
+
+// Ensure a default workspace exists when there is no session (local dev without Docker)
+function ensureDefaultWorkspace() {
+    const defaultDir = path.join(BASE_WORKSPACES, 'default');
+    const templatesDir = path.join(defaultDir, 'templates');
+    if (!fs.existsSync(path.join(defaultDir, 'app.py'))) {
+        fs.mkdirSync(templatesDir, { recursive: true });
+
+        fs.writeFileSync(path.join(defaultDir, 'README.md'), `# 🐛 Challenge: Fix the Login Bug\n\nOpen \`app.py\` and fix the bug in the \`/login\` route so that valid credentials succeed.\n\nCredentials: \`admin\` / \`secret123\`\n\n**Run with:** \`python app.py\`\n`);
+
+        fs.writeFileSync(path.join(defaultDir, 'app.py'), `from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+
+USERS = [
+    {"username": "admin", "password": "secret123"},
+    {"username": "alice", "password": "wonderland"},
+]
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    if not data or 'username' not in data or 'password' not in data:
+        return jsonify({"error": "Missing username or password"}), 400
+
+    password = data['password']
+
+    for user in USERS:
+        if username == user:  # BUG: 'username' is not defined; should be user['username'] == data['username']
+            if user['password'] == password:
+                return jsonify({"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.success"}), 200
+
+    return jsonify({"error": "Invalid credentials"}), 401
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=3000, debug=True)
+`);
+
+        fs.writeFileSync(path.join(templatesDir, 'index.html'), `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><title>Login — Flask Challenge</title>
+  <style>
+    body { min-height:100vh; display:flex; align-items:center; justify-content:center;
+           background:#0f0f1a; font-family:'Segoe UI',sans-serif; color:#e0e0e0; }
+    .card { background:#1a1a2e; border:1px solid #2d2d50; border-radius:12px;
+            padding:40px; width:360px; box-shadow:0 8px 32px rgba(0,0,0,.5); }
+    h1 { font-size:22px; color:#a78bfa; margin-bottom:8px; }
+    label { display:block; font-size:12px; color:#888; margin-top:16px; margin-bottom:4px; }
+    input { width:100%; padding:10px 14px; background:#0f0f1a; border:1px solid #333;
+            border-radius:8px; color:#e0e0e0; font-size:14px; }
+    button { width:100%; margin-top:24px; padding:12px;
+             background:linear-gradient(135deg,#7c3aed,#a78bfa);
+             border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
+    #result { margin-top:16px; padding:10px 14px; border-radius:8px; font-size:13px; display:none; }
+    .success { background:#14290a; color:#4ade80; border:1px solid #166534; }
+    .error   { background:#290a0a; color:#f87171; border:1px solid #7f1d1d; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔐 Flask Login</h1>
+    <p style="font-size:13px;color:#666;">Challenge: Fix the bug so login works!</p>
+    <label>Username</label><input id="u" type="text" placeholder="admin" />
+    <label>Password</label><input id="p" type="password" placeholder="secret123" />
+    <button onclick="go()">Login</button>
+    <div id="result"></div>
+  </div>
+  <script>
+    async function go() {
+      const r = document.getElementById('result');
+      try {
+        const res = await fetch('/login', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({username: u.value.trim(), password: p.value.trim()})
+        });
+        const d = await res.json();
+        r.style.display='block';
+        r.className = res.ok ? 'success' : 'error';
+        r.textContent = res.ok ? '✅ ' + d.token : '❌ ' + (d.error || 'Failed');
+      } catch(e) { r.style.display='block'; r.className='error'; r.textContent='⚠️ Server unreachable'; }
+    }
+    document.onkeydown = e => e.key==='Enter' && go();
+  </script>
+</body>
+</html>
+`);
+    }
+    return defaultDir;
+}
+
 // Resolve the root directory for the current user's session
 function getWorkspaceRoot(req) {
     if (req.session && req.session.workspaceDir) {
         return req.session.workspaceDir;
     }
-    // Fallback for missing sessions
-    return process.env.WORKSPACE_DIR || path.join(__dirname, '..', 'workspace');
+    // Fallback: use the default workspace (seeded with the Flask challenge)
+    return ensureDefaultWorkspace();
 }
 
 // Ensure path is within user's workspace (security)
