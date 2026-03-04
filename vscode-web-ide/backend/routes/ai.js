@@ -136,7 +136,8 @@ router.post('/chat', async (req, res) => {
         res.end();
 
     } catch (error) {
-        console.error('Bedrock AI Error:', error);
+        console.error('Bedrock AI Error:', error.name, error.message);
+        console.error('Bedrock AI Error Details:', JSON.stringify({ httpStatusCode: error.$metadata?.httpStatusCode, requestId: error.$metadata?.requestId, name: error.name }, null, 2));
 
         // Handle specific AWS auth/config errors gracefully
         let errorMsg = 'An error occurred while connecting to the AI Mentor.';

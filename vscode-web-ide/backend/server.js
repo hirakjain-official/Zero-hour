@@ -80,15 +80,13 @@ app.get('/health', (req, res) => {
 });
 
 // WebSocket terminal handler
-wss.on('connection', (ws) => {
-    // Expected connection url: wss://domain.com/terminal?sessionId=abc
-    const wsUrl = ws.url || ws._socket?.url || '/';
-    // Dummy host since we just need to parse the searchParams
-    const url = new URL(wsUrl, `http://localhost`);
+wss.on('connection', (ws, req) => {
+    // `req` is the HTTP upgrade request - parse sessionId from its URL
+    const url = new URL(req.url, `http://localhost`);
     const sessionId = url.searchParams.get('sessionId');
 
     const session = sessionManager.getSession(sessionId);
-    if (!session) {
+    if (!session || !session.containerName) {
         ws.send(JSON.stringify({ type: 'output', data: '\r\n❌ Session expired or invalid. Please refresh.\r\n' }));
         return ws.close();
     }
