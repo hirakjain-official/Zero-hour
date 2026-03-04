@@ -3,29 +3,22 @@ const router = express.Router();
 const { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 // Initialize Bedrock Client
-// Supports both IAM credentials (AKIA...) and Bedrock API Keys (BedrockAPIKey-...)
+// On EC2: SDK automatically uses the instance IAM role (no credentials needed in .env)
+// For local dev: set AWS_ACCESS_KEY_ID (AKIA...) + AWS_SECRET_ACCESS_KEY in .env
 const clientConfig = { region: process.env.AWS_REGION || 'us-east-1' };
 
 const keyId = process.env.AWS_ACCESS_KEY_ID || '';
 const secretKey = process.env.AWS_SECRET_ACCESS_KEY || '';
 
-if (keyId.startsWith('BedrockAPIKey') && secretKey) {
-    // Bedrock API Key auth: decode base64 secret to get the actual API key
-    const decoded = Buffer.from(secretKey, 'base64').toString('utf-8');
-    // Format is "BedrockAPIKey-xxx:ActualSecretKey" — extract the secret part
-    const actualSecret = decoded.includes(':') ? decoded.split(':').slice(1).join(':') : decoded;
-    clientConfig.credentials = {
-        accessKeyId: keyId,
-        secretAccessKey: actualSecret
-    };
-} else if (keyId.startsWith('AKIA') || keyId.startsWith('ASIA')) {
-    // Standard IAM credentials
+// Only use explicit credentials if they are real IAM keys (start with AKIA/ASIA)
+// Bedrock API keys (BedrockAPIKey-...) cannot be used with SigV4 signing —
+// in that case we fall through and let the EC2 instance role handle auth.
+if ((keyId.startsWith('AKIA') || keyId.startsWith('ASIA')) && secretKey) {
     clientConfig.credentials = {
         accessKeyId: keyId,
         secretAccessKey: secretKey
     };
 }
-// If neither, SDK will use EC2 instance role / environment automatically
 
 const bedrock = new BedrockRuntimeClient(clientConfig);
 
