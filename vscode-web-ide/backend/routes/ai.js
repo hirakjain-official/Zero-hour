@@ -3,23 +3,13 @@ const router = express.Router();
 const { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 // Initialize Bedrock Client
-// On EC2: SDK automatically uses the instance IAM role (no credentials needed in .env)
-// For local dev: set AWS_ACCESS_KEY_ID (AKIA...) + AWS_SECRET_ACCESS_KEY in .env
 const clientConfig = { region: process.env.AWS_REGION || 'us-east-1' };
-
-const keyId = process.env.AWS_ACCESS_KEY_ID || '';
-const secretKey = process.env.AWS_SECRET_ACCESS_KEY || '';
-
-// Only use explicit credentials if they are real IAM keys (start with AKIA/ASIA)
-// Bedrock API keys (BedrockAPIKey-...) cannot be used with SigV4 signing —
-// in that case we fall through and let the EC2 instance role handle auth.
-if ((keyId.startsWith('AKIA') || keyId.startsWith('ASIA')) && secretKey) {
+if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
     clientConfig.credentials = {
-        accessKeyId: keyId,
-        secretAccessKey: secretKey
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
     };
 }
-
 const bedrock = new BedrockRuntimeClient(clientConfig);
 
 const SYSTEM_CONTEXT = `You are a brilliant, highly observant, and slightly sarcastic Senior AI Mentor built directly into a VS Code-like cloud IDE.
