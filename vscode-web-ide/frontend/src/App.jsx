@@ -94,7 +94,7 @@ import Preview from './components/Preview';
 import AiChat from './components/AiChat';
 import { Smartphone, Sparkles, PanelLeft, PanelBottom, ChevronRight, ChevronLeft } from 'lucide-react';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
 
 function useNotification() {
   const [notification, setNotification] = useState(null);
