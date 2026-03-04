@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 // Initialize Bedrock Client
 // Automatically uses AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY if securely provided in .env
@@ -222,25 +222,39 @@ router.post('/evaluate', async (req, res) => {
 
         currentContext += `Evaluate this state and return the strict JSON payload.`;
 
-        const command = new InvokeModelCommand({
-            modelId: "mistral.mistral-large-2407-v1:0", // Changed model id as user runs on mistral.mistral-large-2407-v1:0 in previous file history
-            contentType: "application/json",
-            accept: "application/json",
+        // Use streaming command with devstral (same as chat route)
+        const command = new InvokeModelWithResponseStreamCommand({
+            modelId: 'mistral.devstral-2-123b',
+            contentType: 'application/json',
+            accept: 'application/json',
             body: JSON.stringify({
-                prompt: `<s>[INST] ${EVALUATOR_CONTEXT}\n\n${currentContext} [/INST]`,
-                max_tokens: 200,
-                temperature: 0.2, // Low temp for strict JSON adherence
+                messages: [
+                    { role: 'system', content: EVALUATOR_CONTEXT },
+                    { role: 'user', content: currentContext }
+                ],
+                max_tokens: 300,
+                temperature: 0.2,
             })
         });
 
         const response = await bedrock.send(command);
-        const data = JSON.parse(new TextDecoder().decode(response.body));
-        let aiText = data.outputs[0].text.trim();
 
-        // Basic clean up in case Mistral still wraps in markdown
-        if (aiText.startsWith('\`\`\`json')) aiText = aiText.replace('\`\`\`json', '');
-        if (aiText.startsWith('\`\`\`')) aiText = aiText.replace('\`\`\`', '');
-        if (aiText.endsWith('\`\`\`')) aiText = aiText.substring(0, aiText.length - 3);
+        // Collect all streamed chunks into one string
+        let aiText = '';
+        for await (const event of response.body) {
+            if (event.chunk && event.chunk.bytes) {
+                const chunkData = JSON.parse(new TextDecoder().decode(event.chunk.bytes));
+                if (chunkData.choices && chunkData.choices[0]?.delta?.content) {
+                    aiText += chunkData.choices[0].delta.content;
+                } else if (chunkData.outputs && chunkData.outputs[0]?.text) {
+                    aiText += chunkData.outputs[0].text;
+                }
+            }
+        }
+
+        aiText = aiText.trim();
+        // Strip markdown code fences if model wrapped the JSON
+        aiText = aiText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '');
 
         const parsedJson = JSON.parse(aiText.trim());
         res.json(parsedJson);
