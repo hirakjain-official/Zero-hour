@@ -127,8 +127,11 @@ export default function App() {
   const [aiWidth, setAiWidth] = useState(320);
 
   const [aiPopup, setAiPopup] = useState(null);
+  const [agentAnnotation, setAgentAnnotation] = useState(null); // {line, message, action}
   const lastEvalCodeRef = useRef('');
   const evalTimerRef = useRef(null);
+  const inactivityTimerRef = useRef(null);
+  const annotationTimerRef = useRef(null);
 
   const [activeTerminalTab, setActiveTerminalTab] = useState('output');
   const [terminalOutput, setTerminalOutput] = useState([
@@ -200,9 +203,8 @@ export default function App() {
   }, []); // Run once on mount
 
   // --- Background AI Evaluator Loop ---
-  const triggerEvaluator = useCallback(async () => {
+  const triggerEvaluator = useCallback(async (isInactivity = false) => {
     if (!activeTabData?.content || !sessionId) return;
-    console.log('🤖 AI Agent Executing Evaluation...');
     try {
       lastEvalCodeRef.current = activeTabData.content;
       const fileTreeContext = JSON.stringify(fileTree || {}, null, 2).slice(0, 1500);
@@ -215,39 +217,55 @@ export default function App() {
         body: JSON.stringify({
           code: activeTabData.content.slice(0, 3000),
           language: activeTabData.name?.split('.').pop(),
+          activeFileName: activeTabData.name || '',
           fileTree: fileTreeContext,
           openTabs: openTabsContext,
-          terminalOutput: terminalContext
+          terminalOutput: terminalContext,
+          inactivity: isInactivity
         })
       });
       const data = await res.json();
-      console.log('🤖 AI Agent Result:', data);
 
       if (data.action && data.action !== 'ignore') {
         setAiPopup({ action: data.action, message: data.message });
         setTimeout(() => setAiPopup(null), data.action === 'praise' ? 4000 : 7000);
+
+        // Inline annotation on the target line
+        if (data.line) {
+          if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
+          setAgentAnnotation({ line: data.line, message: data.message, action: data.action });
+          annotationTimerRef.current = setTimeout(() => setAgentAnnotation(null), 5000);
+        }
       }
     } catch (e) {
       console.error('AI Agent Background Error:', e);
     }
-  }, [activeTabData, sessionId, fileTree, tabs, terminalOutput, setAiPopup, API]);
+  }, [activeTabData, sessionId, fileTree, tabs, terminalOutput, API]);
 
   useEffect(() => {
-    // Only trigger if code actually changed since last eval (ignore minor whitespace, but keep fast reaction)
     if (!activeTabData?.content || activeTabData.content === lastEvalCodeRef.current) return;
 
-    if (evalTimerRef.current) clearTimeout(evalTimerRef.current);
-    evalTimerRef.current = setTimeout(triggerEvaluator, 2500); // 2.5s debounce
+    // Reset inactivity timer on every edit
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    inactivityTimerRef.current = setTimeout(() => triggerEvaluator(true), 8000);
 
-    return () => clearTimeout(evalTimerRef.current);
+    // Normal eval debounce
+    if (evalTimerRef.current) clearTimeout(evalTimerRef.current);
+    evalTimerRef.current = setTimeout(() => triggerEvaluator(false), 2000);
+
+    return () => {
+      clearTimeout(evalTimerRef.current);
+      clearTimeout(inactivityTimerRef.current);
+    };
   }, [activeTabData?.content, triggerEvaluator]);
 
-  // Hook for forced manual button evaluation
+  // Also trigger inactivity when user switches files (might be stuck looking at wrong file)
   useEffect(() => {
-    const handleForceEval = () => triggerEvaluator();
-    window.addEventListener('force-ai-eval', handleForceEval);
-    return () => window.removeEventListener('force-ai-eval', handleForceEval);
-  }, [triggerEvaluator]);
+    if (!activeTabData?.name || !sessionId) return;
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    inactivityTimerRef.current = setTimeout(() => triggerEvaluator(true), 8000);
+    return () => clearTimeout(inactivityTimerRef.current);
+  }, [activeTabData?.name, triggerEvaluator, sessionId]);
 
   useEffect(() => {
     if (sessionReady) loadTree();
@@ -766,6 +784,7 @@ export default function App() {
             onCursorChange={setCursorPos}
             onLanguageChange={setCurrentLang}
             editorRef={editorRef}
+            agentAnnotation={agentAnnotation}
           />
 
           {showTerminal && (

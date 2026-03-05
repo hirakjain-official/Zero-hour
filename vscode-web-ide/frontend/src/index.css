@@ -1840,3 +1840,61 @@ body {
   background: #2d2d2d;
   cursor: default;
 }
+
+/* ===== AGENT INLINE ANNOTATIONS ===== */
+
+/* Line highlighting per action */
+.agent-line-praise {
+  background: rgba(76, 175, 80, 0.08) !important;
+}
+
+.agent-line-scold {
+  background: rgba(255, 152, 0, 0.08) !important;
+}
+
+.agent-line-redirect {
+  background: rgba(244, 67, 54, 0.08) !important;
+}
+
+.agent-line-nudge {
+  background: rgba(198, 120, 221, 0.08) !important;
+}
+
+/* Glyph margin indicators */
+.agent-glyph-praise::before,
+.agent-glyph-scold::before,
+.agent-glyph-redirect::before,
+.agent-glyph-nudge::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin: 5px 3px;
+}
+
+.agent-glyph-praise {
+  color: #4caf50;
+}
+
+.agent-glyph-scold {
+  color: #ff9800;
+}
+
+.agent-glyph-redirect {
+  color: #f44336;
+}
+
+.agent-glyph-nudge {
+  color: #c678dd;
+}
+
+/* Inline hint text that appears after the line content */
+.agent-inline-hint {
+  color: rgba(180, 180, 180, 0.6);
+  font-style: italic;
+  font-size: 12px;
+  padding-left: 16px;
+  pointer-events: none;
+  user-select: none;
+}

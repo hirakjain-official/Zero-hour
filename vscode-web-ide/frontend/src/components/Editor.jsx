@@ -25,8 +25,9 @@ function isRunnable(filename) {
     return RUNNABLE.has(ext);
 }
 
-export default function Editor({ tab, onContentChange, onSave, onRun, isRunning, onCursorChange, onLanguageChange, editorRef: externalEditorRef }) {
+export default function Editor({ tab, onContentChange, onSave, onRun, isRunning, onCursorChange, onLanguageChange, editorRef: externalEditorRef, agentAnnotation }) {
     const internalEditorRef = useRef(null);
+    const decorationsRef = useRef([]);
     const [minimap, setMinimap] = useState(true);
     const [wordWrap, setWordWrap] = useState('off');
 
@@ -103,6 +104,40 @@ export default function Editor({ tab, onContentChange, onSave, onRun, isRunning,
             });
         }
     }, [minimap, wordWrap]);
+
+    // Agent inline annotations via Monaco deltaDecorations
+    useEffect(() => {
+        const editor = internalEditorRef.current;
+        if (!editor) return;
+
+        if (!agentAnnotation) {
+            // Clear decorations
+            decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []);
+            return;
+        }
+
+        const COLORS = { praise: '#4caf50', scold: '#ff9800', redirect: '#f44336', nudge: '#c678dd' };
+        const color = COLORS[agentAnnotation.action] || '#888';
+        const line = Math.max(1, agentAnnotation.line || 1);
+
+        decorationsRef.current = editor.deltaDecorations(decorationsRef.current, [
+            {
+                range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
+                options: {
+                    isWholeLine: true,
+                    className: `agent-line-${agentAnnotation.action}`,
+                    glyphMarginClassName: `agent-glyph-${agentAnnotation.action}`,
+                    after: {
+                        content: `  🤖 ${agentAnnotation.message}`,
+                        inlineClassName: `agent-inline-hint`,
+                    }
+                }
+            }
+        ]);
+
+        // Scroll to the annotation line softly
+        editor.revealLineInCenterIfOutsideViewport(line);
+    }, [agentAnnotation]);
 
     if (!tab) {
         return (

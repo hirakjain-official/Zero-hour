@@ -158,69 +158,67 @@ router.post('/chat', async (req, res) => {
     }
 });
 
-const EVALUATOR_CONTEXT = `You are a strict, real-time AI Evaluator embedded in a VS Code IDE.
-You watch the user's EVERY KEYSTROKE (2.5-second debounce). You do NOT chat. You ONLY judge their current edit and return a JSON action.
+const EVALUATOR_CONTEXT = `You are a real-time AI Code Evaluator embedded in a VS Code IDE. You watch every edit (2s debounce). Return ONLY a JSON action — never chat.
 
-=== THE ACTIVE CHALLENGE (Your Secret Knowledge) ===
-The user must fix a Flask login bug in app.py.
-- THE ONLY FILE THAT MATTERS: app.py
-- THE ONLY SECTION THAT MATTERS: the /login route (the for-loop and the comparison 'if username == user:')
-- THE BUG:
-    1. 'username' is never extracted from 'data' (NameError — only 'password' was extracted)
-    2. 'user' in the loop is a dict, not a string — comparing string == dict is always False
-- THE FIX: add 'username = data["username"]' before the loop AND change comparison to 'if user["username"] == username:'
-- templates/index.html and README.md do NOT need any changes at all.
-======================================================
+=== SECRET: THE CHALLENGE ===
+Fix the Flask login bug in app.py → /login route.
+BUG 1: 'username' never extracted from 'data' → NameError
+BUG 2: 'user' in loop is a dict, comparing string==dict → always False
+FIX: add 'username = data["username"]' AND change 'if username == user:' to 'if user["username"] == username:'
+Files index.html and README.md need ZERO changes.
+===========================
 
-DECISION RULES (apply in order, first match wins):
+RULES (first match wins):
 
-1. REDIRECT — if the currently active/focused file is NOT app.py (e.g., user is editing index.html, README.md, or any other file):
-   Always fire immediately. The bug is exclusively in app.py.
-   Example messages:
-   - "That HTML is perfectly fine — your Python is the problem! Open app.py."
-   - "README won't fix a NameError. Go to app.py → /login route."
+1. REDIRECT — active file is NOT app.py:
+   Guide them to app.py. Never say "this file is fine." Instead, hint at WHERE the bug lives.
+   Line: 1. Max 12 words.
+   Examples: "The bug is a Python NameError. Which file runs Python?" / "This file is innocent. Think: where does /login live?"
 
-2. SCOLD — if the user IS in app.py BUT is editing anywhere OUTSIDE the /login route:
-   (e.g., editing the USERS list, imports, the index route, or app config)
-   Example messages:
-   - "The USERS list looks fine. The bug is hiding inside the /login function, not up here."
-   - "Your imports aren't broken. Scroll down to the /login route."
+2. SCOLD — in app.py but OUTSIDE /login route (editing imports, USERS, index route, app.run):
+   Point them to /login. Be specific about which line range to look at.
+   Line: the line they're editing. Max 12 words.
+   Examples: "Cold! The crash happens inside a function below line 15." / "USERS list is correct. Scroll to where passwords get checked."
 
-3. SCOLD — if the user IS in app.py AND near the /login route but the comparison is STILL wrong or username is still missing:
-   Example messages:
-   - "Warmer! But did you actually extract 'username' from 'data' before the loop? Check what variables exist."
-   - "Almost! 'user' in that loop is a dict — you can't compare it to a string directly. Think keys."
+3. SCOLD — in app.py, near /login but bug NOT fixed:
+   Give progressive Socratic hints — never the answer. Ask a question.
+   Line: the buggy line number. Max 15 words.
+   Examples: "What variables exist before this loop? Count them." / "'user' is a dict with keys. You're comparing it to a string?"
 
-4. PRAISE — if the code now has BOTH fixes:
-   - Contains 'username = data["username"]' (or equivalent extraction)
-   - The comparison correctly accesses 'user["username"]'
-   Example messages:
-   - "YESSS! That's it! The login route is now logically sound. Run it and watch it work! 🎉"
-   - "Bug squashed! You extracted username properly AND fixed the comparison. Chef's kiss. 👨‍🍳"
+4. PRAISE — BOTH fixes present (username extracted AND comparison uses user["username"]):
+   Celebrate briefly.
+   Line: the fixed line. Max 10 words.
+   Examples: "Bug crushed! Run it. 🎉" / "Both fixes landed. Beautiful. 🔥"
 
-5. IGNORE (default) — if the user is in app.py, near the /login route, and making reasonable progress:
-   Use this 70% of the time to avoid spam. message must be "".
+5. NUDGE — when inactivity=true (user hasn't typed for 8s):
+   Give a stronger directional hint. Don't reveal the answer but point closer.
+   Line: the most relevant line. Max 15 words.
+   Examples: "Stuck? Read line 22 carefully — what's missing before the loop?" / "8 seconds idle. Hint: 'data' has a field you never grabbed."
 
-Return ONLY raw JSON — no markdown, no explanation:
-{"action": "praise" | "scold" | "redirect" | "ignore", "message": "..."}`;
+6. IGNORE — user is in app.py, near /login, making progress. Use 50% of the time. Message MUST be "".
+
+Return ONLY raw JSON:
+{"action": "praise"|"scold"|"redirect"|"nudge"|"ignore", "message": "...", "line": <number>}`;
 
 // POST /api/ai/evaluate
 // Silent background evaluator that returns strict JSON actions
 router.post('/evaluate', async (req, res) => {
-    const { code, language, fileTree, openTabs, terminalOutput } = req.body;
+    const { code, language, fileTree, openTabs, terminalOutput, inactivity, activeFileName } = req.body;
 
     try {
-        let currentContext = "=== LIVE IDE ECOSYSTEM STATE ===\n";
+        let currentContext = "=== LIVE IDE STATE ===\n";
 
-        if (fileTree) currentContext += `[WORKSPACE FILE TREE]\n\`\`\`json\n${fileTree}\n\`\`\`\n\n`;
-        if (openTabs) currentContext += `[CURRENTLY OPEN TABS]: ${openTabs}\n\n`;
-        if (terminalOutput) currentContext += `[RECENT TERMINAL LOGS]\n\`\`\`\n${terminalOutput}\n\`\`\`\n\n`;
+        if (activeFileName) currentContext += `[ACTIVE FILE]: ${activeFileName}\n`;
+        if (fileTree) currentContext += `[FILE TREE]\n\`\`\`json\n${fileTree}\n\`\`\`\n\n`;
+        if (openTabs) currentContext += `[OPEN TABS]: ${openTabs}\n\n`;
+        if (terminalOutput) currentContext += `[TERMINAL]\n\`\`\`\n${terminalOutput}\n\`\`\`\n\n`;
+        if (inactivity) currentContext += `[⚠️ INACTIVITY DETECTED]: User has not typed for 8+ seconds. They may be stuck. Give a stronger hint.\n\n`;
 
         if (code) {
-            currentContext += `[ACTIVELY FOCUSED FILE JUST EDITED] (${language || 'unknown'}):\n\`\`\`${language || ''}\n${code.slice(0, 3000)}\n\`\`\`\n\n`;
+            currentContext += `[FOCUSED FILE CODE] (${language || 'unknown'}):\n\`\`\`${language || ''}\n${code.slice(0, 3000)}\n\`\`\`\n\n`;
         }
 
-        currentContext += `Evaluate this state and return the strict JSON payload.`;
+        currentContext += `Evaluate and return JSON.`;
 
         // Use streaming command with devstral (same as chat route)
         const command = new InvokeModelWithResponseStreamCommand({
