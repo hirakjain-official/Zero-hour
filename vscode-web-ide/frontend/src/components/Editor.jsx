@@ -178,18 +178,7 @@ export default function Editor({ tab, onContentChange, onSave, onRun, isRunning,
                         )}
                     </button>
                 )}
-                <button
-                    className="run-button"
-                    style={{ marginLeft: '10px', backgroundColor: '#673ab7' }}
-                    onClick={() => {
-                        console.log('User manually fired AI Agent');
-                        // Dispatch a custom window event that App.jsx listens to
-                        window.dispatchEvent(new CustomEvent('force-ai-eval'));
-                    }}
-                    title="Force AI Evaluation"
-                >
-                    Trigger Agent
-                </button>
+
                 <div style={{ flex: 1 }} />
                 <button
                     className={`editor-toggle-btn ${wordWrap === 'on' ? 'active' : ''}`}
