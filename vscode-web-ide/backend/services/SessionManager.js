@@ -36,32 +36,50 @@ class SessionManager {
     return crypto.randomBytes(16).toString('hex');
   }
 
-  // Helper to test if a port is actually free on the host
+  // Helper to test if a port is actually free on the host AND in docker
   async isPortFree(port) {
-    return new Promise(resolve => {
-      const server = require('net').createServer();
-      server.once('error', () => resolve(false));
-      server.once('listening', () => {
-        server.close(() => resolve(true));
+    try {
+      // 1. Check if Node can bind to it
+      const nodeFree = await new Promise(resolve => {
+        const server = require('net').createServer();
+        server.once('error', () => resolve(false));
+        server.once('listening', () => {
+          server.close(() => resolve(true));
+        });
+        server.listen(port, '0.0.0.0');
       });
-      server.listen(port, '0.0.0.0');
-    });
+
+      if (!nodeFree) return false;
+
+      // 2. Check if Docker is using it (sometimes Docker holds it but allows Node to bind, or vice versa depending on iptables)
+      const { stdout } = await execPromise(`docker ps --format "{{.Ports}}"`);
+      if (stdout.includes(`:${port}->`)) {
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      return false; // Safest to assume not free on error
+    }
   }
 
   // Get the next available port for preview routing
   async getNextAvailablePort() {
-    let port = this.basePort + 1;
-    while (true) {
+    let port = this.basePort + Math.floor(Math.random() * 500) + 1; // Randomize start port to avoid rapid collision loops
+    let attempts = 0;
+    while (attempts < 1000) {
       const usedPorts = Array.from(this.sessions.values()).map(s => s.port);
       if (!usedPorts.includes(port)) {
         if (await this.isPortFree(port)) {
           return port;
         }
       }
-      port++;
-      if (port > this.basePort + 1000) throw new Error("No free ports available");
+      port = this.basePort + Math.floor(Math.random() * 1000) + 1; // Try another random port
+      attempts++;
     }
+    throw new Error("No free ports available after 1000 attempts");
   }
+
 
   // Initialize a new session
   async createSession(requestedSessionId = null) {
