@@ -6,55 +6,89 @@ const crypto = require('crypto');
 const execPromise = util.promisify(exec);
 
 class SessionManager {
-    constructor() {
-        this.sessions = new Map(); // sessionId -> { port, lastActive, containerName, workspaceDir }
-        this.basePort = 32000;
+  constructor() {
+    this.sessions = new Map(); // sessionId -> { port, lastActive, containerName, workspaceDir }
+    this.basePort = 32000;
 
-        // Start the cleanup interval (every 5 minutes)
-        setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
+    // Start the cleanup interval (every 5 minutes)
+    setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
+
+    // Try to clear zombies on startup
+    this.clearZombies();
+  }
+
+  async clearZombies() {
+    try {
+      console.log('[SessionManager] Clearing out any zombie ide-workspace containers...');
+      const { stdout } = await execPromise('docker ps -a -q --filter "name=ide-workspace-"');
+      const ids = stdout.trim().split('\n').filter(Boolean);
+      if (ids.length > 0) {
+        await execPromise(`docker rm -f ${ids.join(' ')}`);
+        console.log(`[SessionManager] Removed ${ids.length} zombie containers.`);
+      }
+    } catch (e) {
+      // ignore
     }
+  }
 
-    // Generate a unique session ID
-    generateSessionId() {
-        return crypto.randomBytes(16).toString('hex');
-    }
+  // Generate a unique session ID
+  generateSessionId() {
+    return crypto.randomBytes(16).toString('hex');
+  }
 
-    // Get the next available port for preview routing
-    getNextAvailablePort() {
-        let port = this.basePort + 1;
-        const usedPorts = Array.from(this.sessions.values()).map(s => s.port);
-        while (usedPorts.includes(port)) {
-            port++;
+  // Helper to test if a port is actually free on the host
+  async isPortFree(port) {
+    return new Promise(resolve => {
+      const server = require('net').createServer();
+      server.once('error', () => resolve(false));
+      server.once('listening', () => {
+        server.close(() => resolve(true));
+      });
+      server.listen(port, '0.0.0.0');
+    });
+  }
+
+  // Get the next available port for preview routing
+  async getNextAvailablePort() {
+    let port = this.basePort + 1;
+    while (true) {
+      const usedPorts = Array.from(this.sessions.values()).map(s => s.port);
+      if (!usedPorts.includes(port)) {
+        if (await this.isPortFree(port)) {
+          return port;
         }
-        return port;
+      }
+      port++;
+      if (port > this.basePort + 1000) throw new Error("No free ports available");
+    }
+  }
+
+  // Initialize a new session
+  async createSession(requestedSessionId = null) {
+    let sessionId = requestedSessionId;
+
+    if (sessionId && this.sessions.has(sessionId)) {
+      // Reattach to existing session
+      const session = this.sessions.get(sessionId);
+      session.lastActive = Date.now();
+      return { sessionId, isNew: false, ...session };
     }
 
-    // Initialize a new session
-    async createSession(requestedSessionId = null) {
-        let sessionId = requestedSessionId;
+    // Create new session
+    sessionId = sessionId || this.generateSessionId();
+    const port = await this.getNextAvailablePort();
+    const containerName = `ide-workspace-${sessionId.slice(0, 8)}`;
 
-        if (sessionId && this.sessions.has(sessionId)) {
-            // Reattach to existing session
-            const session = this.sessions.get(sessionId);
-            session.lastActive = Date.now();
-            return { sessionId, isNew: false, ...session };
-        }
+    // Create user's workspace directory
+    const baseWorkspaceDir = process.env.WORKSPACE_DIR || path.join(__dirname, '../../workspaces');
+    const userWorkspaceDir = path.join(baseWorkspaceDir, sessionId);
 
-        // Create new session
-        sessionId = sessionId || this.generateSessionId();
-        const port = this.getNextAvailablePort();
-        const containerName = `ide-workspace-${sessionId.slice(0, 8)}`;
+    if (!fs.existsSync(userWorkspaceDir)) {
+      fs.mkdirSync(userWorkspaceDir, { recursive: true });
+      fs.mkdirSync(path.join(userWorkspaceDir, 'templates'), { recursive: true });
 
-        // Create user's workspace directory
-        const baseWorkspaceDir = process.env.WORKSPACE_DIR || path.join(__dirname, '../../workspaces');
-        const userWorkspaceDir = path.join(baseWorkspaceDir, sessionId);
-
-        if (!fs.existsSync(userWorkspaceDir)) {
-            fs.mkdirSync(userWorkspaceDir, { recursive: true });
-            fs.mkdirSync(path.join(userWorkspaceDir, 'templates'), { recursive: true });
-
-            // ── README: Challenge description ──
-            fs.writeFileSync(path.join(userWorkspaceDir, 'README.md'), `# 🐛 Challenge: Fix the Login Bug
+      // ── README: Challenge description ──
+      fs.writeFileSync(path.join(userWorkspaceDir, 'README.md'), `# 🐛 Challenge: Fix the Login Bug
 
 ## What this app does
 A simple Flask login API + HTML frontend. Users can enter a username and password, hit **Login**, and receive a JWT-style success token.
@@ -75,11 +109,11 @@ Then open: http://localhost:3000
 **Hint:** Start by reading the \`/login\` route carefully. 👀
 `);
 
-            // ── app.py: Flask backend with DELIBERATE BUG ──
-            // BUG: Inside the for-loop, `user` is a dict like {"username":..., "password":...}
-            // The code compares `username == user` (dict vs string) — always False.
-            // Fix: change to `user['username'] == username` and extract username from data first.
-            fs.writeFileSync(path.join(userWorkspaceDir, 'app.py'), `from flask import Flask, request, jsonify, render_template
+      // ── app.py: Flask backend with DELIBERATE BUG ──
+      // BUG: Inside the for-loop, `user` is a dict like {"username":..., "password":...}
+      // The code compares `username == user` (dict vs string) — always False.
+      // Fix: change to `user['username'] == username` and extract username from data first.
+      fs.writeFileSync(path.join(userWorkspaceDir, 'app.py'), `from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -117,8 +151,8 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=3000, debug=True)
 `);
 
-            // ── templates/index.html: Simple login UI ──
-            fs.writeFileSync(path.join(userWorkspaceDir, 'templates', 'index.html'), `<!DOCTYPE html>
+      // ── templates/index.html: Simple login UI ──
+      fs.writeFileSync(path.join(userWorkspaceDir, 'templates', 'index.html'), `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -223,87 +257,87 @@ if __name__ == '__main__':
 </body>
 </html>
 `);
-        }
+    }
 
-        const sessionData = {
-            sessionId,
-            port,
-            containerName,
-            workspaceDir: userWorkspaceDir,
-            lastActive: Date.now()
-        };
+    const sessionData = {
+      sessionId,
+      port,
+      containerName,
+      workspaceDir: userWorkspaceDir,
+      lastActive: Date.now()
+    };
 
-        this.sessions.set(sessionId, sessionData);
+    this.sessions.set(sessionId, sessionData);
 
-        // Spin up the Docker container
-        try {
-            // Stop/remove if a container with this name somehow exists
-            await execPromise(`docker rm -f ${containerName}`).catch(() => { });
+    // Spin up the Docker container
+    try {
+      // Stop/remove if a container with this name somehow exists
+      await execPromise(`docker rm -f ${containerName}`).catch(() => { });
 
-            // Run lightweight Alpine container
-            // -p external_port:3000 -> Maps EC2 32001 to container's 3000
-            const cmd = `docker run -d --name ${containerName} \\
+      // Run lightweight Alpine container
+      // -p external_port:3000 -> Maps EC2 32001 to container's 3000
+      const cmd = `docker run -d --name ${containerName} \\
                 -v "${userWorkspaceDir}":/home/developer/workspace \\
                 -p ${port}:3000 \\
                 --user developer \\
                 --memory="1024m" \\
                 vscode-workspace`;
 
-            await execPromise(cmd);
-            console.log(`[SessionManager] Created session ${sessionId} (Port: ${port})`);
+      await execPromise(cmd);
+      console.log(`[SessionManager] Created session ${sessionId} (Port: ${port})`);
 
-            return { isNew: true, ...sessionData };
-        } catch (e) {
-            console.error(`[SessionManager] Failed to create container for ${sessionId}:`, e);
-            this.sessions.delete(sessionId);
-            throw e;
-        }
+      return { isNew: true, ...sessionData };
+    } catch (e) {
+      console.error(`[SessionManager] Failed to create container for ${sessionId}:`, e);
+      this.sessions.delete(sessionId);
+      throw e;
+    }
+  }
+
+  // Ping session to keep it alive
+  touchSession(sessionId) {
+    if (this.sessions.has(sessionId)) {
+      const session = this.sessions.get(sessionId);
+      session.lastActive = Date.now();
+      return true;
+    }
+    return false;
+  }
+
+  // Get session details
+  getSession(sessionId) {
+    return this.sessions.get(sessionId);
+  }
+
+  // Destroy a session and its container
+  async destroySession(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    console.log(`[SessionManager] Destroying session ${sessionId}...`);
+
+    try {
+      await execPromise(`docker rm -f ${session.containerName}`);
+    } catch (e) {
+      console.error(`[SessionManager] Docker rm failed for ${session.containerName}:`, e);
     }
 
-    // Ping session to keep it alive
-    touchSession(sessionId) {
-        if (this.sessions.has(sessionId)) {
-            const session = this.sessions.get(sessionId);
-            session.lastActive = Date.now();
-            return true;
-        }
-        return false;
+    this.sessions.delete(sessionId);
+    console.log(`[SessionManager] Session ${sessionId} destroyed.`);
+  }
+
+  // Cleanup idle sessions (> 30 mins)
+  async cleanupIdleSessions() {
+    const MAX_IDLE_TIME = 30 * 60 * 1000; // 30 mins
+    const now = Date.now();
+
+    for (const [sessionId, session] of this.sessions.entries()) {
+      if (now - session.lastActive > MAX_IDLE_TIME) {
+        console.log(`[SessionManager] Session ${sessionId} timed out (idle).`);
+        await this.destroySession(sessionId);
+      }
     }
-
-    // Get session details
-    getSession(sessionId) {
-        return this.sessions.get(sessionId);
-    }
-
-    // Destroy a session and its container
-    async destroySession(sessionId) {
-        const session = this.sessions.get(sessionId);
-        if (!session) return;
-
-        console.log(`[SessionManager] Destroying session ${sessionId}...`);
-
-        try {
-            await execPromise(`docker rm -f ${session.containerName}`);
-        } catch (e) {
-            console.error(`[SessionManager] Docker rm failed for ${session.containerName}:`, e);
-        }
-
-        this.sessions.delete(sessionId);
-        console.log(`[SessionManager] Session ${sessionId} destroyed.`);
-    }
-
-    // Cleanup idle sessions (> 30 mins)
-    async cleanupIdleSessions() {
-        const MAX_IDLE_TIME = 30 * 60 * 1000; // 30 mins
-        const now = Date.now();
-
-        for (const [sessionId, session] of this.sessions.entries()) {
-            if (now - session.lastActive > MAX_IDLE_TIME) {
-                console.log(`[SessionManager] Session ${sessionId} timed out (idle).`);
-                await this.destroySession(sessionId);
-            }
-        }
-    }
+  }
 }
 
 // Export a singleton instance
